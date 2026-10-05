@@ -1,0 +1,7 @@
+anthropic>=0.40
+pydantic>=2.6
+psycopg2-binary>=2.9
+pyspark==3.5.3
+faster-whisper>=1.0
+yt-dlp
+pytest>=8
