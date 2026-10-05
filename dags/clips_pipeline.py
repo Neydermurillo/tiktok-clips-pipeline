@@ -34,8 +34,13 @@ def clips_pipeline():
         from clips.editor import cut_pending
         return cut_pending()
 
-    # Fase 2: publish_to_tiktok() y collect_metrics()
-    cut(score(transcribe(ingest())))
+    @task
+    def publish(_):
+        from clips.publisher import publish_pending
+        return publish_pending()
+
+    # Fase 3: collect_metrics()
+    publish(cut(score(transcribe(ingest()))))
 
 
 clips_pipeline()

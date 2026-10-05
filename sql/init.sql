@@ -10,6 +10,14 @@ CREATE TABLE videos (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE transcript_lines (
+    id       SERIAL PRIMARY KEY,
+    video_id INT NOT NULL REFERENCES videos(id),
+    start_s  DOUBLE PRECISION NOT NULL,
+    end_s    DOUBLE PRECISION NOT NULL,
+    text     TEXT NOT NULL
+);
+
 CREATE TABLE segments (
     id           SERIAL PRIMARY KEY,
     video_id     INT NOT NULL REFERENCES videos(id),
@@ -29,9 +37,12 @@ CREATE TABLE clips (
     id             SERIAL PRIMARY KEY,
     segment_id     INT NOT NULL UNIQUE REFERENCES segments(id),
     file_path      TEXT NOT NULL,
-    status         TEXT NOT NULL DEFAULT 'rendered',  -- rendered -> published
+    status         TEXT NOT NULL DEFAULT 'rendered',  -- rendered -> ready_manual | in_inbox | published | failed
     tiktok_post_id TEXT,
-    published_at   TIMESTAMPTZ
+    published_at   TIMESTAMPTZ,
+    caption        TEXT,
+    publish_id     TEXT,
+    error          TEXT
 );
 
 CREATE TABLE clip_metrics (

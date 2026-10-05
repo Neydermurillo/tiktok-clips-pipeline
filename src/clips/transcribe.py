@@ -14,7 +14,13 @@ def transcribe_file(path: str) -> list[dict]:
 def transcribe_pending() -> int:
     videos = db.query("SELECT id, local_path FROM videos WHERE status = 'downloaded'")
     for v in videos:
-        candidates = build_candidates(transcribe_file(v["local_path"]))
+        lines = transcribe_file(v["local_path"])
+        for ln in lines:
+            db.execute(
+                "INSERT INTO transcript_lines (video_id, start_s, end_s, text) VALUES (%s,%s,%s,%s)",
+                (v["id"], ln["start"], ln["end"], ln["text"].strip()),
+            )
+        candidates = build_candidates(lines)
         for c in candidates:
             db.execute(
                 "INSERT INTO segments (video_id, start_s, end_s, text) VALUES (%s, %s, %s, %s)",
