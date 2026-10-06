@@ -1,0 +1,7 @@
+Finding:     ANTHROPIC_API_KEY=REDACTED
+Secret:      REDACTED
+RuleID:      ...
+File:        .env.example
+Line:        1
+Commit:      abc1234...
+Fingerprint: abc1234...:.env.example:generic-api-key:1
