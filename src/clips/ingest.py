@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from clips import db
@@ -9,14 +10,34 @@ def read_sources(path: Path = SOURCES_FILE) -> list[str]:
     return [l for l in lines if l and not l.startswith("#")]
 
 
+def has_audio(path: str) -> bool:
+    """True si el archivo tiene al menos una pista de audio."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=index", "-of", "csv=p=0", path],
+        capture_output=True, text=True,
+    )
+    return out.returncode == 0 and bool(out.stdout.strip())
+
+
 def download(url: str) -> tuple[str, str]:
     from yt_dlp import YoutubeDL
 
     VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-    opts = {"outtmpl": str(VIDEOS_DIR / "%(id)s.%(ext)s"), "format": "mp4/best", "quiet": True}
+    opts = {
+        "outtmpl": str(VIDEOS_DIR / "%(id)s.%(ext)s"),
+        # video + audio por separado, unidos con FFmpeg: evita mp4 sin sonido
+        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+        "merge_output_format": "mp4",
+        "quiet": True,
+    }
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        return info.get("title", ""), ydl.prepare_filename(info)
+        downloads = info.get("requested_downloads") or [{}]
+        path = downloads[0].get("filepath") or ydl.prepare_filename(info)
+    if not has_audio(path):
+        raise RuntimeError(f"El video descargado no tiene pista de audio: {path}")
+    return info.get("title", ""), path
 
 
 def ingest_new_videos() -> int:

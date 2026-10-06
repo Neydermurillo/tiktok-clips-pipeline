@@ -9,7 +9,7 @@ default_args = {"retries": 2, "retry_delay": timedelta(minutes=5)}
     dag_id="clips_pipeline",
     schedule="@daily",
     start_date=datetime(2026, 1, 1),
-    catchup=False,
+    catchup=False, max_active_runs=1,
     default_args=default_args,
     tags=["tiktok", "pyspark", "claude"],
 )

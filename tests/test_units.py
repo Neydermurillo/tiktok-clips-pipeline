@@ -30,7 +30,7 @@ def test_parse_score_rejects_out_of_range():
 
 def test_ffmpeg_cmd_is_vertical():
     cmd = build_ffmpeg_cmd("in.mp4", 1.0, 31.0, "out.mp4")
-    assert "crop=ih*9/16:ih,scale=1080:1920" in cmd
+    assert "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" in cmd
 
 
 @pytest.mark.skipif(shutil.which("java") is None, reason="requiere Java")

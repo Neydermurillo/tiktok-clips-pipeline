@@ -1,10 +1,25 @@
-from clips import db
-from clips.claude_client import score_segment
+import logging
+import re
+
+from clips import db, llm
 from clips.config import KEEP_K_CLIPS, TOP_N_SEGMENTS
 from clips.scoring_spark import get_spark, rule_scores
 
+log = logging.getLogger(__name__)
+DEFAULT_HASHTAGS = ["#fyp", "#parati", "#viral"]
+
+
+def local_metadata(text: str) -> tuple[str, str, list[str]]:
+    """Título, hook y hashtags básicos sin IA: usa la primera frase del segmento."""
+    clean = " ".join(text.split())
+    first = re.split(r"(?<=[.!?])\s", clean, maxsplit=1)[0]
+    title = (first[:70].rstrip() + "…") if len(first) > 70 else first
+    return title, first[:140], DEFAULT_HASHTAGS
+
 
 def score_pending() -> int:
+    provider = llm.provider()
+    log.info("Proveedor de IA para el scoring: %s", provider)
     videos = db.query("SELECT id FROM videos WHERE status = 'transcribed'")
     spark = get_spark() if videos else None
     for v in videos:
@@ -16,15 +31,21 @@ def score_pending() -> int:
         for sid, sc in scores.items():
             db.execute("UPDATE segments SET rule_score = %s WHERE id = %s", (sc, sid))
 
-        # Claude solo evalúa los mejores candidatos (ahorra costo)
+        # Solo los mejores candidatos reciben puntaje final (y llamada a la IA si hay proveedor)
         top = sorted(segs, key=lambda s: scores[s["id"]], reverse=True)[:TOP_N_SEGMENTS]
         for s in top:
-            res = score_segment(s["text"])
-            final = 0.4 * scores[s["id"]] + 0.6 * res.score
+            if provider != "none":
+                res = llm.score_segment(s["text"])
+                llm_score, final = res.score, 0.4 * scores[s["id"]] + 0.6 * res.score
+                title, hook, hashtags = res.title, res.hook, res.hashtags
+            else:
+                llm_score, final = None, scores[s["id"]]
+                title, hook, hashtags = local_metadata(s["text"])
+            # la columna se llama claude_score por historia; guarda el puntaje del proveedor activo
             db.execute(
                 "UPDATE segments SET claude_score=%s, final_score=%s, title=%s, hook=%s, hashtags=%s "
                 "WHERE id=%s",
-                (res.score, final, res.title, res.hook, res.hashtags, s["id"]),
+                (llm_score, final, title, hook, hashtags, s["id"]),
             )
         db.execute(
             "UPDATE segments SET selected = TRUE WHERE id IN ("
