@@ -1,3 +1,4 @@
 # Una URL por línea. Usa SOLO contenido propio o con licencia que permita remezclarlo.
 https://www.youtube.com/watch?v=srEMKVe4X8w
 https://www.youtube.com/shorts/FOyfupcppbo
+file:mi_video.mp4

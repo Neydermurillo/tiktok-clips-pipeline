@@ -13,6 +13,9 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 
 MIN_CLIP_S = 20
 MAX_CLIP_S = 60
+# Si al final del video queda una cola menor a MIN_CLIP_S, se une a la última ventana mientras el
+# clip resultante no pase de este tope (segundos). 0 = descartar siempre la cola.
+TAIL_MERGE_MAX_S = float(os.getenv("TAIL_MERGE_MAX_S", "90"))
 TOP_N_SEGMENTS = int(os.getenv("TOP_N_SEGMENTS", "10"))
 KEEP_K_CLIPS = int(os.getenv("KEEP_K_CLIPS", "3"))
 

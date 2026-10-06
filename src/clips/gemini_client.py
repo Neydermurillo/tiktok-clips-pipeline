@@ -4,8 +4,8 @@ import time
 from clips import db
 from clips.claude_client import SYSTEM, ClipScore, parse_score  # mismo prompt y esquema para ambos proveedores
 
-DEFAULT_MODEL = "gemini-2.5-flash"  # verifica el nombre vigente en AI Studio y cámbialo con GEMINI_MODEL
-MAX_TRIES = 4
+DEFAULT_MODEL = "gemini-3.8-flash"  # verifica el nombre vigente en AI Studio y cámbialo con GEMINI_MODEL
+MAX_BACKOFF_S = 60
 RETRYABLE = (429, 500, 503)
 _last_call = 0.0
 
@@ -32,10 +32,32 @@ def _throttle() -> None:
     _last_call = time.monotonic()
 
 
+def _max_tries() -> int:
+    return max(1, int(os.getenv("GEMINI_MAX_TRIES", "6")))
+
+
+def _models(model: str | None) -> list[str]:
+    """Modelo principal y, si está definido, uno de respaldo para cuando el principal está saturado."""
+    primary = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    fallback = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
+    return [primary] + ([fallback] if fallback and fallback != primary else [])
+
+
+def _generate(client, model: str, text: str, config, tries: int):
+    for attempt in range(tries):
+        _throttle()
+        try:
+            return client.models.generate_content(model=model, contents=f"Segmento:\n{text}", config=config)
+        except Exception as exc:
+            if attempt == tries - 1 or not is_retryable(exc):
+                raise
+            time.sleep(min(5 * 2**attempt, MAX_BACKOFF_S))  # 5, 10, 20, 40, 60 s
+    raise AssertionError("inalcanzable")
+
+
 def score_segment(text: str, model: str | None = None) -> ClipScore:
     from google.genai import types
 
-    model = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
     client = _client()
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM,
@@ -43,15 +65,15 @@ def score_segment(text: str, model: str | None = None) -> ClipScore:
         temperature=0.3,
         max_output_tokens=2048,  # margen: en modelos con "thinking" esos tokens cuentan aquí
     )
-    for attempt in range(MAX_TRIES):
-        _throttle()
+    candidates = _models(model)
+    for i, name in enumerate(candidates):
         try:
-            resp = client.models.generate_content(model=model, contents=f"Segmento:\n{text}", config=config)
+            resp = _generate(client, name, text, config, _max_tries() if i == 0 else 2)
+            model = name
             break
         except Exception as exc:
-            if attempt == MAX_TRIES - 1 or not is_retryable(exc):
+            if i == len(candidates) - 1 or not is_retryable(exc):
                 raise
-            time.sleep(5 * 2**attempt)  # 5 s, 10 s, 20 s
     usage = getattr(resp, "usage_metadata", None)
     db.execute(
         "INSERT INTO llm_calls (task, model, input_tokens, output_tokens) VALUES (%s,%s,%s,%s)",

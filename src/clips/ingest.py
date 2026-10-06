@@ -10,6 +10,30 @@ def read_sources(path: Path = SOURCES_FILE) -> list[str]:
     return [l for l in lines if l and not l.startswith("#")]
 
 
+LOCAL_PREFIX = "file:"
+
+
+def resolve_local(entry: str) -> Path:
+    """'file:mi_video.mp4' -> VIDEOS_DIR/mi_video.mp4; una ruta absoluta se usa tal cual."""
+    raw = entry[len(LOCAL_PREFIX):].strip()
+    if not raw:
+        raise ValueError(f"Entrada local vacía en sources.txt: {entry!r}")
+    path = Path(raw)
+    return path if path.is_absolute() else VIDEOS_DIR / path
+
+
+def register_local(entry: str) -> tuple[str, str]:
+    """Valida un video local y devuelve (título, ruta)."""
+    path = resolve_local(entry)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"No existe el video local {path}. Cópialo a data/videos/ y usa file:<nombre> en sources.txt"
+        )
+    if not has_audio(str(path)):
+        raise RuntimeError(f"El video local no tiene pista de audio: {path}")
+    return path.stem, str(path)
+
+
 def has_audio(path: str) -> bool:
     """True si el archivo tiene al menos una pista de audio."""
     out = subprocess.run(
@@ -45,7 +69,7 @@ def ingest_new_videos() -> int:
     known = {r["source_url"] for r in db.query("SELECT source_url FROM videos")}
     new = [u for u in read_sources() if u not in known]
     for url in new:
-        title, path = download(url)
+        title, path = register_local(url) if url.startswith(LOCAL_PREFIX) else download(url)
         db.execute(
             "INSERT INTO videos (source_url, title, local_path) VALUES (%s, %s, %s) "
             "ON CONFLICT (source_url) DO NOTHING",

@@ -125,3 +125,91 @@ def test_scoring_without_provider_never_calls_ai(monkeypatch):
     assert scoring.score_pending() == 1
     final = [p for sql, p in updates if "final_score" in sql and p and len(p) == 6]
     assert all(p[0] is None and p[4] == scoring.DEFAULT_HASHTAGS for p in final)
+
+
+# ---------- resistencia ante saturación (503) ----------
+def test_gemini_backoff_is_capped_and_tries_configurable(monkeypatch):
+    sleeps = []
+    calls, _ = _setup(monkeypatch, [FakeAPIError(503)] * 8)
+    monkeypatch.setattr(gemini_client.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setenv("GEMINI_MAX_TRIES", "7")
+    with pytest.raises(FakeAPIError):
+        gemini_client.score_segment("t")
+    assert len(calls) == 7
+    assert sleeps == [5, 10, 20, 40, 60, 60]
+
+
+def test_gemini_falls_back_to_second_model(monkeypatch):
+    calls, logged = _setup(monkeypatch, [FakeAPIError(503), FakeAPIError(503), _resp()])
+    monkeypatch.setenv("GEMINI_MODEL", "principal")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "respaldo")
+    monkeypatch.setenv("GEMINI_MAX_TRIES", "2")
+    assert gemini_client.score_segment("t").score == 80
+    assert [c["model"] for c in calls] == ["principal", "principal", "respaldo"]
+    assert logged[0][1] == "gemini:respaldo"
+
+
+def test_gemini_no_fallback_on_client_error(monkeypatch):
+    calls, _ = _setup(monkeypatch, [FakeAPIError(400), _resp()])
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "respaldo")
+    with pytest.raises(FakeAPIError):
+        gemini_client.score_segment("t")
+    assert len(calls) == 1
+
+
+def test_scoring_skips_segments_already_scored(monkeypatch):
+    updates = []
+
+    def query(sql, params=None):
+        if "FROM videos" in sql:
+            return [{"id": 1}]
+        return [
+            {"id": 1, "text": "A. B.", "duration": 30.0, "final_score": 77.0},
+            {"id": 2, "text": "C. D.", "duration": 30.0, "final_score": None},
+        ]
+
+    monkeypatch.setattr(scoring.db, "query", query)
+    monkeypatch.setattr(scoring.db, "execute", lambda sql, params=None: updates.append((sql, params)))
+    monkeypatch.setattr(scoring, "get_spark", lambda: object())
+    monkeypatch.setattr(scoring, "rule_scores", lambda s, rows: {r["id"]: 10.0 for r in rows})
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    asked = []
+    monkeypatch.setattr(scoring.llm, "score_segment", lambda t: asked.append(t) or ClipScore(score=90, title="IA", hook="h", hashtags=["#a"]))
+    scoring.score_pending()
+    assert asked == ["C. D."]
+
+
+def test_scoring_sends_only_needed_columns_to_spark(monkeypatch):
+    seen = []
+
+    def query(sql, params=None):
+        if "FROM videos" in sql:
+            return [{"id": 1}]
+        return [{"id": 1, "text": "A. B.", "duration": 30.0, "final_score": None}]
+
+    monkeypatch.setattr(scoring.db, "query", query)
+    monkeypatch.setattr(scoring.db, "execute", lambda sql, params=None: None)
+    monkeypatch.setattr(scoring, "get_spark", lambda: object())
+    monkeypatch.setattr(scoring, "rule_scores", lambda s, rows: seen.append(rows) or {1: 10.0})
+    monkeypatch.setenv("LLM_PROVIDER", "none")
+    scoring.score_pending()
+    assert set(seen[0][0]) == {"id", "text", "duration"}
+
+
+def test_scoring_with_real_spark_and_null_final_score(monkeypatch):
+    """Regresión: un final_score todo NULL no debe llegar a Spark (CANNOT_DETERMINE_TYPE)."""
+    updates = []
+
+    def query(sql, params=None):
+        if "FROM videos" in sql:
+            return [{"id": 1}]
+        return [
+            {"id": 1, "text": "¿Por qué nunca funciona? Es un secreto.", "duration": 30.0, "final_score": None},
+            {"id": 2, "text": "Otra frase cualquiera sin más.", "duration": 25.0, "final_score": None},
+        ]
+
+    monkeypatch.setattr(scoring.db, "query", query)
+    monkeypatch.setattr(scoring.db, "execute", lambda sql, params=None: updates.append((sql, params)))
+    monkeypatch.setenv("LLM_PROVIDER", "none")
+    assert scoring.score_pending() == 1
+    assert any("rule_score" in sql for sql, _ in updates)

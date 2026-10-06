@@ -13,9 +13,9 @@ def test_build_candidates_groups_until_sentence_end():
         {"start": 10, "end": 25, "text": "esto es una idea."},
         {"start": 25, "end": 40, "text": "otra idea"},
     ]
-    out = build_candidates(segs, min_s=20, max_s=60)
+    out = build_candidates(segs, min_s=20, max_s=60, tail_max_s=0)
     assert out[0]["start_s"] == 0 and out[0]["end_s"] == 25
-    assert len(out) == 1  # el resto (15s) es menor que min_s
+    assert len(out) == 1  # el resto (15s) es menor que min_s y la unión de la cola está desactivada
 
 
 def test_parse_score_tolerates_markdown_fences():
