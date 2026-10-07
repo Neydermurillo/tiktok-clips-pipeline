@@ -24,7 +24,8 @@ def status_to_clip_status(tiktok_status: str) -> str:
 def _write_manual_queue(items: list[dict]) -> None:
     path = Path(CLIPS_DIR) / "publish_queue.csv"
     new = not path.exists()
-    with path.open("a", newline="", encoding="utf-8") as f:
+    # utf-8-sig: Excel y PowerShell muestran bien tildes y emojis (Python no repite el BOM al agregar)
+    with path.open("a", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=["clip_id", "file_path", "caption"])
         if new:
             w.writeheader()
